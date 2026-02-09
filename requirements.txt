@@ -1,9 +1,10 @@
 fastapi
-uvicorn
-sentence-transformers
-faiss-cpu
-transformers
-torch
+uvicorn[standard]
+
+sentence-transformers==2.2.2
+transformers==4.41.2
+torch==2.2.2
+faiss-cpu==1.7.4
+numpy
 tqdm
 huggingface-hub
-numpy
