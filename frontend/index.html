@@ -14,7 +14,7 @@
 async function ask(){
     const q = document.getElementById("question").value;
 
-    const res = await fetch("https://YOUR-RENDER-URL/ask", {
+    const res = await fetch("https://ragbot-1-s85z.onrender.com", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({question:q})
