@@ -5,21 +5,24 @@ import numpy as np
 import torch
 import faiss
 
-from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 
 from config import *
 
-# ---------- AUTH ----------
-# set token once in terminal:
-# export HF_TOKEN=your_token  (Linux/Mac)
-# setx HF_TOKEN your_token    (Windows)
+# =========================================================
+# AUTHENTICATION
+# =========================================================
+# Set token once in terminal:
+# Windows: setx HF_TOKEN your_token
+# Linux/Mac: export HF_TOKEN=your_token
 
 login(token=os.getenv("HF_TOKEN"))
 
-# ---------- CHUNKING ----------
+# =========================================================
+# TEXT CHUNKING
+# =========================================================
 def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     words = text.split()
     chunks = []
@@ -30,6 +33,9 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     return chunks
 
 
+# =========================================================
+# LOAD JSON FILES
+# =========================================================
 def load_json_files(path):
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -43,7 +49,9 @@ def load_json_files(path):
     return data
 
 
-# ---------- DATA PROCESS ----------
+# =========================================================
+# DATA PROCESSING
+# =========================================================
 def process_youtube_data(path):
     docs = []
     for item in load_json_files(path):
@@ -77,26 +85,30 @@ def process_website_data(path):
     return docs
 
 
-# ---------- BUILD RAG ----------
+# =========================================================
+# BUILD RAG DOCUMENTS + FAISS INDEX (ONCE)
+# =========================================================
 os.makedirs("outputs", exist_ok=True)
 
 rag_docs = []
-rag_docs += process_youtube_data(YOUTUBE_PATH)
-rag_docs += process_website_data(WEBSITE_PATH)
+rag_docs.extend(process_youtube_data(YOUTUBE_PATH))
+rag_docs.extend(process_website_data(WEBSITE_PATH))
 
 with open(RAG_DOCS_PATH, "w", encoding="utf-8") as f:
     json.dump(rag_docs, f, indent=2, ensure_ascii=False)
 
-# ---------- EMBEDDINGS ----------
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
-texts = [d["text"] for d in rag_docs]
+
+texts = [doc["text"] for doc in rag_docs]
 embeddings = embedder.encode(texts, show_progress_bar=True).astype("float32")
 
 index = faiss.IndexFlatL2(embeddings.shape[1])
 index.add(embeddings)
 faiss.write_index(index, FAISS_INDEX_PATH)
 
-# ---------- LLM ----------
+# =========================================================
+# LOAD LLM
+# =========================================================
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
@@ -104,19 +116,26 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype=torch.float16
 )
 
-# ---------- RAG QUERY ----------
-def retrieve(query, k=5):
-    q_emb = embedder.encode([query]).astype("float32")
-    _, ids = index.search(q_emb, k)
-    return [rag_docs[i] for i in ids[0]]
+# =========================================================
+# RETRIEVAL + GENERATION
+# =========================================================
+def retrieve_top_k(query, k=5):
+    query_embedding = embedder.encode([query]).astype("float32")
+    _, indices = index.search(query_embedding, k)
+    return [rag_docs[i] for i in indices[0]]
 
-def ask(question):
-    context = "\n\n".join(d["text"] for d in retrieve(question))
+
+def rag_answer(question, k=5):
+    docs = retrieve_top_k(question, k)
+    context = "\n\n".join(d["text"] for d in docs)
 
     prompt = f"""
-Answer using ONLY this context.
-Max 2 sentences.
-If unknown, say: I don't know.
+You are a concise assistant.
+
+Answer the question using ONLY the context below.
+Use at most TWO short sentences.
+Do NOT mention the context or the question.
+If the answer is not found, say: I don't know.
 
 Context:
 {context}
@@ -125,13 +144,32 @@ Answer:
 """.strip()
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    out = model.generate(**inputs, max_new_tokens=80)
-    return tokenizer.decode(out[0], skip_special_tokens=True).split("Answer:")[-1].strip()
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=80,
+            do_sample=False,
+            temperature=0.2
+        )
+
+    full_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    answer = full_output.split("Answer:")[-1].strip()
+
+    sentences = answer.split(".")
+    answer = ".".join(sentences[:2]).strip()
+    if not answer.endswith("."):
+        answer += "."
+
+    return answer
 
 
-# ---------- CLI ----------
-while True:
-    q = input("\n❓ Ask (exit to quit): ")
-    if q.lower() == "exit":
-        break
-    print(ask(q))
+# =========================================================
+# CLI ENTRY POINT (SAFE)
+# =========================================================
+if __name__ == "__main__":
+    while True:
+        question = input("\n❓ Ask a question (or type 'exit'): ")
+        if question.lower() in ["exit", "quit"]:
+            break
+        print(rag_answer(question))
