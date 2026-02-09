@@ -1,3 +1,5 @@
+fastapi
+uvicorn
 sentence-transformers
 faiss-cpu
 transformers
@@ -5,4 +7,3 @@ torch
 tqdm
 huggingface-hub
 numpy
-streamlit
