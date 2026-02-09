@@ -1,7 +1,5 @@
 import os
 import json
-import uuid
-import numpy as np
 import torch
 import faiss
 
@@ -28,88 +26,14 @@ class Query(BaseModel):
 login(token=os.getenv("HF_TOKEN"))
 
 # =========================================================
-# TEXT CHUNKING
+# LOAD EXISTING RAG DOCUMENTS + FAISS INDEX
 # =========================================================
-def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
-    words = text.split()
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunks.append(" ".join(words[i:i + chunk_size]))
-        i += chunk_size - overlap
-    return chunks
+with open(RAG_DOCS_PATH, "r", encoding="utf-8") as f:
+    rag_docs = json.load(f)
 
-# =========================================================
-# LOAD JSON FILES
-# =========================================================
-def load_json_files(path):
-    if os.path.isfile(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return [json.load(f)]
-
-    data = []
-    for file in os.listdir(path):
-        if file.endswith(".json"):
-            with open(os.path.join(path, file), "r", encoding="utf-8") as f:
-                data.append(json.load(f))
-    return data
-
-# =========================================================
-# DATA PROCESSING
-# =========================================================
-def process_youtube_data(path):
-    docs = []
-    for item in load_json_files(path):
-        for seg in item:
-            text = seg.get("text", "")
-            if text.strip():
-                for i, chunk in enumerate(chunk_text(text)):
-                    docs.append({
-                        "id": str(uuid.uuid4()),
-                        "source": "youtube",
-                        "text": chunk,
-                        "metadata": {
-                            "video_id": item.get("video_id"),
-                            "chunk_id": i
-                        }
-                    })
-    return docs
-
-def process_website_data(path):
-    docs = []
-    for item in load_json_files(path):
-        for i, chunk in enumerate(chunk_text(item.get("page_text", ""))):
-            docs.append({
-                "id": str(uuid.uuid4()),
-                "source": "website",
-                "text": chunk,
-                "metadata": {
-                    "page_url": item.get("page_url"),
-                    "chunk_id": i
-                }
-            })
-    return docs
-
-# =========================================================
-# BUILD RAG DOCUMENTS + FAISS INDEX
-# =========================================================
-os.makedirs("outputs", exist_ok=True)
-
-rag_docs = []
-rag_docs.extend(process_youtube_data(YOUTUBE_PATH))
-rag_docs.extend(process_website_data(WEBSITE_PATH))
-
-with open(RAG_DOCS_PATH, "w", encoding="utf-8") as f:
-    json.dump(rag_docs, f, indent=2, ensure_ascii=False)
+index = faiss.read_index(FAISS_INDEX_PATH)
 
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
-
-texts = [doc["text"] for doc in rag_docs]
-embeddings = embedder.encode(texts, show_progress_bar=True).astype("float32")
-
-index = faiss.IndexFlatL2(embeddings.shape[1])
-index.add(embeddings)
-faiss.write_index(index, FAISS_INDEX_PATH)
 
 # =========================================================
 # LOAD LLM
@@ -138,7 +62,6 @@ You are a concise assistant.
 
 Answer the question using ONLY the context below.
 Use at most TWO short sentences.
-Do NOT mention the context or the question.
 If the answer is not found, say: I don't know.
 
 Context:
@@ -153,18 +76,11 @@ Answer:
         outputs = model.generate(
             **inputs,
             max_new_tokens=80,
-            do_sample=False,
-            temperature=0.2
+            do_sample=False
         )
 
     full_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
     answer = full_output.split("Answer:")[-1].strip()
-
-    sentences = answer.split(".")
-    answer = ".".join(sentences[:2]).strip()
-    if not answer.endswith("."):
-        answer += "."
-
     return answer
 
 # =========================================================
@@ -176,11 +92,9 @@ def ask_question(q: Query):
     return {"answer": answer}
 
 # =========================================================
-# CLI ENTRY POINT
+# CLI TEST
 # =========================================================
 if __name__ == "__main__":
     while True:
-        question = input("\n❓ Ask a question (or type 'exit'): ")
-        if question.lower() in ["exit", "quit"]:
-            break
-        print(rag_answer(question))
+        q = input("Ask: ")
+        print(rag_answer(q))
