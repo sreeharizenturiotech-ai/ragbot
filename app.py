@@ -55,9 +55,19 @@ def load_json_files(path):
 def process_youtube_data(path):
     docs = []
     for item in load_json_files(path):
+<<<<<<< HEAD
        for seg in item:
          text = seg["text"]
            for i, chunk in enumerate(chunk_text(seg.get("text", ""))):
+=======
+        for item in data
+            for seg in item:     
+                text = seg.get("text", "")
+                if text.strip():
+                    docs.append(text)
+
+            for i, chunk in enumerate(chunk_text(seg.get("text", ""))):
+>>>>>>> f5a1405 (Add Streamlit UI for RAG chatbot)
                 docs.append({
                     "id": str(uuid.uuid4()),
                     "source": "youtube",
