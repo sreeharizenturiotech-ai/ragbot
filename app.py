@@ -55,8 +55,9 @@ def load_json_files(path):
 def process_youtube_data(path):
     docs = []
     for item in load_json_files(path):
-        for seg in item.get("segments", []):
-            for i, chunk in enumerate(chunk_text(seg.get("text", ""))):
+       for seg in item:
+         text = seg["text"]
+           for i, chunk in enumerate(chunk_text(seg.get("text", ""))):
                 docs.append({
                     "id": str(uuid.uuid4()),
                     "source": "youtube",
