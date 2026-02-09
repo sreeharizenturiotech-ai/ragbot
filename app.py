@@ -9,15 +9,22 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 
+from fastapi import FastAPI
+from pydantic import BaseModel
+
 from config import *
+
+# =========================================================
+# FASTAPI INIT
+# =========================================================
+app = FastAPI()
+
+class Query(BaseModel):
+    question: str
 
 # =========================================================
 # AUTHENTICATION
 # =========================================================
-# Set token once in terminal:
-# Windows: setx HF_TOKEN your_token
-# Linux/Mac: export HF_TOKEN=your_token
-
 login(token=os.getenv("HF_TOKEN"))
 
 # =========================================================
@@ -31,7 +38,6 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
         chunks.append(" ".join(words[i:i + chunk_size]))
         i += chunk_size - overlap
     return chunks
-
 
 # =========================================================
 # LOAD JSON FILES
@@ -48,37 +54,26 @@ def load_json_files(path):
                 data.append(json.load(f))
     return data
 
-
 # =========================================================
 # DATA PROCESSING
 # =========================================================
 def process_youtube_data(path):
     docs = []
     for item in load_json_files(path):
-<<<<<<< HEAD
-       for seg in item:
-         text = seg["text"]
-           for i, chunk in enumerate(chunk_text(seg.get("text", ""))):
-=======
-        for item in data
-            for seg in item:     
-                text = seg.get("text", "")
-                if text.strip():
-                    docs.append(text)
-
-            for i, chunk in enumerate(chunk_text(seg.get("text", ""))):
->>>>>>> f5a1405 (Add Streamlit UI for RAG chatbot)
-                docs.append({
-                    "id": str(uuid.uuid4()),
-                    "source": "youtube",
-                    "text": chunk,
-                    "metadata": {
-                        "video_id": item.get("video_id"),
-                        "chunk_id": i
-                    }
-                })
+        for seg in item:
+            text = seg.get("text", "")
+            if text.strip():
+                for i, chunk in enumerate(chunk_text(text)):
+                    docs.append({
+                        "id": str(uuid.uuid4()),
+                        "source": "youtube",
+                        "text": chunk,
+                        "metadata": {
+                            "video_id": item.get("video_id"),
+                            "chunk_id": i
+                        }
+                    })
     return docs
-
 
 def process_website_data(path):
     docs = []
@@ -95,9 +90,8 @@ def process_website_data(path):
             })
     return docs
 
-
 # =========================================================
-# BUILD RAG DOCUMENTS + FAISS INDEX (ONCE)
+# BUILD RAG DOCUMENTS + FAISS INDEX
 # =========================================================
 os.makedirs("outputs", exist_ok=True)
 
@@ -134,7 +128,6 @@ def retrieve_top_k(query, k=5):
     query_embedding = embedder.encode([query]).astype("float32")
     _, indices = index.search(query_embedding, k)
     return [rag_docs[i] for i in indices[0]]
-
 
 def rag_answer(question, k=5):
     docs = retrieve_top_k(question, k)
@@ -174,9 +167,16 @@ Answer:
 
     return answer
 
+# =========================================================
+# FASTAPI ENDPOINT
+# =========================================================
+@app.post("/ask")
+def ask_question(q: Query):
+    answer = rag_answer(q.question)
+    return {"answer": answer}
 
 # =========================================================
-# CLI ENTRY POINT (SAFE)
+# CLI ENTRY POINT
 # =========================================================
 if __name__ == "__main__":
     while True:
